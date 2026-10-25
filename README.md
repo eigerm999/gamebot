@@ -15,11 +15,12 @@ rejected with `unsupported_operation`.
 | Operation | yes918 |
 | --- | --- |
 | `createPlayer` | ✅ |
-| `setScore` | — |
-| `resetPassword` | — |
-| `disablePlayer` | — |
-| `gameLog` | — |
-| `kickPlayer` | — |
+| `playerInfo` | ✅ (read-only) |
+| `setScore` | ⏳ portal meaning of "new score" unconfirmed |
+| `resetPassword` | ✅ |
+| `disablePlayer` | ✅ (`enable: true` re-enables) |
+| `gameLog` | ✗ no portal endpoint found |
+| `kickPlayer` | ✅ |
 
 ## Setup
 

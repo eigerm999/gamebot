@@ -11,7 +11,7 @@ import { createProvider as yes918 } from './yes918/index.js';
  * Mutating operations must call ctx.assertCanSubmit() immediately before the
  * request that changes the portal, and nothing may be retried after it.
  */
-export const OPERATIONS = ['createPlayer', 'setScore', 'resetPassword', 'disablePlayer', 'gameLog', 'kickPlayer'];
+export const OPERATIONS = ['createPlayer', 'playerInfo', 'setScore', 'resetPassword', 'disablePlayer', 'gameLog', 'kickPlayer'];
 
 const FACTORIES = {
   yes918,

@@ -9,12 +9,14 @@ import { failed, isZero, nonEmpty, redact, unknown } from '../../core/errors.js'
  * (password2 -> POST /login2 -> / -> /search). Done through the rendered pages
  * so each page supplies its own hidden token and AWS WAF runs normally.
  *
- * Implemented: createPlayer. Other operations need their portal requests captured first.
+ * Implemented: createPlayer, playerInfo, resetPassword, disablePlayer, kickPlayer.
+ * Not yet: setScore (semantics of player_setscore_newscore unconfirmed), gameLog (no portal endpoint found).
  */
 
 const LOGIN_PASSWORD2 = 'input[name="password2"]';
 const PASSWORD_PREFIXES = ['Aaa', 'Bbb', 'Ccc', 'Ddd', 'Edd', 'Fff', 'Ggg'];
 const AMOUNT = /^\d{1,9}(\.\d{1,2})?$/;
+const PLAYER_ID = /^[A-Za-z0-9_]{1,50}$/;
 
 function loadSettings() {
   const base = new URL(required('YES918_BASE_URL'));
@@ -243,12 +245,136 @@ export function createProvider() {
     },
   };
 
+  /** {playerId} only; the ID is interpolated into portal URL paths, so keep it strict. */
+  function validatePlayerOnly(params, extra = {}) {
+    const allowed = ['playerId', ...Object.keys(extra)];
+    const keys = Object.keys(params);
+    if (keys.length !== allowed.length || keys.some((key) => !allowed.includes(key))) {
+      return 'invalid_params';
+    }
+    if (typeof params.playerId !== 'string' || !PLAYER_ID.test(params.playerId)) {
+      return 'invalid_player_id';
+    }
+    for (const [key, check] of Object.entries(extra)) {
+      if (!check(params[key])) {
+        return 'invalid_params';
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Shared tail of every portal change: submit once, then
+   * error 0 -> succeeded, explicit non-zero error -> failed, anything else -> unknown.
+   */
+  async function submitChange(session, ctx, urlPath, { method = 'POST', form = null, code }) {
+    ctx.assertCanSubmit();
+
+    let response;
+    try {
+      response = await session.pageFetch(urlPath, { method, form, timeoutMs: ctx.config.submitTimeoutMs });
+    } catch {
+      throw unknown(`${code}_transport`, 'Request did not complete');
+    }
+
+    const json = parseJson(response.text);
+    if (!json) {
+      throw unknown(`${code}_malformed`, `Response was not JSON (HTTP ${response.status})`);
+    }
+    if (response.ok && isZero(json.error)) {
+      return json;
+    }
+    if (nonEmpty(json.error) && !isZero(json.error)) {
+      const message = String(json.error) === '1000' ? 'Player is disabled' : json.message ?? json.msg ?? 'Portal rejected the request';
+      throw failed(`${code}_rejected`, redact(message));
+    }
+    throw unknown(`${code}_unconfirmed`, 'Response did not confirm success');
+  }
+
+  const playerInfo = {
+    validate: (params) => validatePlayerOnly(params),
+
+    /** Read-only: every failure is a confirmed failure. */
+    async run({ session, params, ctx }) {
+      const path = `/playerlist/${encodeURIComponent(params.playerId)}/balance?username=${encodeURIComponent(s.agentUsername)}&game=918`;
+      let response;
+      try {
+        response = await session.pageFetch(path, { timeoutMs: ctx.config.fetchTimeoutMs });
+      } catch {
+        throw failed('info_transport', 'Player info request failed', { retryable: true });
+      }
+
+      const json = parseJson(response.text);
+      if (!json) {
+        session.markLoggedOut('session_expired');
+        throw failed('session_expired', 'Portal session expired', { retryable: true });
+      }
+      if (!response.ok || !isZero(json.error) || !Number.isFinite(Number(json.score))) {
+        throw failed('info_rejected', redact(json.message ?? json.msg ?? 'Player info was rejected'));
+      }
+
+      return {
+        playerId: params.playerId,
+        score: String(json.score),
+        enabled: String(json.status ?? '').toLowerCase() === 'enable',
+        status: redact(json.status ?? ''),
+      };
+    },
+  };
+
+  const resetPassword = {
+    validate: (params) => validatePlayerOnly(params),
+
+    async run({ session, params, ctx }) {
+      const password = generatePlayerPassword();
+      await submitChange(session, ctx, '/playerlist/resetpassword?game=918', {
+        code: 'reset',
+        form: {
+          player_resetpassword_username: params.playerId,
+          player_resetpassword_password: password,
+          player_resetpassword_agent_username: s.agentUsername,
+        },
+      });
+      return { playerId: params.playerId, password };
+    },
+  };
+
+  const disablePlayer = {
+    validate: (params) => validatePlayerOnly(params, { enable: (value) => typeof value === 'boolean' }),
+
+    /** The portal changes status with a GET. */
+    async run({ session, params, ctx }) {
+      const action = params.enable ? 'enable' : 'disable';
+      await submitChange(session, ctx, `/playerlist/${encodeURIComponent(params.playerId)}/${action}?game=918`, { method: 'GET', code: action });
+      return { playerId: params.playerId, enabled: params.enable };
+    },
+  };
+
+  const kickPlayer = {
+    validate: (params) => validatePlayerOnly(params),
+
+    async run({ session, params, ctx }) {
+      await submitChange(session, ctx, '/playerlist/kick?game=918', {
+        code: 'kick',
+        form: {
+          player_kick_username: params.playerId,
+          player_kick_agent_username: s.agentUsername,
+        },
+      });
+      return { playerId: params.playerId };
+    },
+  };
+
   return {
     key: 'yes918',
     proxy: proxyFromEnv('YES918'),
     ensureLoggedIn,
     operations: {
       createPlayer,
+      playerInfo,
+      resetPassword,
+      disablePlayer,
+      kickPlayer,
     },
   };
 }
