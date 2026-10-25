@@ -1,0 +1,18 @@
+{
+  "name": "game-bot",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Browser-backed game portal worker for Maxis6 (one plugin per game provider)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "scripts": {
+    "start": "node --env-file=.env src/server.js",
+    "browser:install": "playwright install chromium",
+    "check": "for f in $(find src -name '*.js'); do node --check \"$f\" || exit 1; done"
+  },
+  "dependencies": {
+    "playwright": "1.64.0"
+  }
+}
