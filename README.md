@@ -7,40 +7,63 @@ a real Chrome session per portal account with Playwright.
 Only use it with portal accounts you are authorized to automate. It never
 bypasses CAPTCHA, MFA or WAF challenges.
 
-## Providers and operations
+## Concepts
 
-Every provider exposes the same operation names. Unimplemented ones are
-rejected with `unsupported_operation`.
+| Term | Meaning | Example |
+| --- | --- | --- |
+| Portal | One kind of agent backend; code in `src/portals/<portal>/` | `yes918` |
+| Account | One login on one portal: own browser profile, session and queue | `yes918-0038` |
 
-| Operation | yes918 |
-| --- | --- |
-| `createPlayer` | ✅ |
-| `playerInfo` | ✅ (read-only) |
-| `setScore` | ⏳ portal meaning of "new score" unconfirmed |
-| `resetPassword` | ✅ |
-| `disablePlayer` | ✅ (`enable: true` re-enables) |
-| `gameLog` | ✗ no portal endpoint found |
-| `kickPlayer` | ✅ |
+Two logins on the same portal are two accounts. In Maxis6 each account is its
+own game (for example `918Kiss5-BOT` -> `yes918-0038`, `918Kiss6-BOT` -> `yes918-0039`).
+
+## Operations
+
+Params are defined once in `src/core/operations.js` and are the same for every
+portal. A portal that does not implement an operation rejects it with
+`unsupported_operation`.
+
+| Operation | Params | yes918 |
+| --- | --- | --- |
+| `createPlayer` | `amount` | ✅ |
+| `setScore` | `playerId`, `amount` (`"10.00"` deposits, `"-10.00"` withdraws) | ✅ |
+| `resetPassword` | `playerId` | ✅ |
+| `disablePlayer` | `playerId`, `enable` | ✅ |
+| `kickPlayer` | `playerId` | ✅ |
+| `playerInfo` | `playerId` | ✅ read-only |
+| `agentBalance` | none | ✅ read-only |
+| `gameLog` | `playerId`, `date`, `page` | ✅ one day per call; the portal refuses old dates |
+| `scoreLog` | `playerId`, `from`, `to`, `page` | ✅ up to 31 days, 50 rows per page |
+
+Each account's `limits` are per transaction and enforced by the worker even if
+the caller sends more: `maxInitialScore` caps one Create ID, `maxSetScore` caps
+one deposit or withdrawal. Use `null` for no limit (amounts are still capped by
+the 9-digit amount format, agent credit in Laravel, and player balance for
+withdrawals). Both keys are required.
 
 ## Setup
 
 ```sh
 npm ci
 npm run browser:install
-cp .env.example .env    # fill WORKER_SECRET and the provider's settings
+cp .env.example .env                    # WORKER_SECRET + account secrets
+cp accounts.example.json accounts.json  # one entry per portal login
 npm start
 curl -s http://127.0.0.1:8918/health
 ```
 
-`/health` returns 200 when every enabled provider has a browser and an
-authenticated session, 503 otherwise (`/health?provider=yes918` for one).
+`accounts.json` never holds secrets: `credentials` and `proxy` name environment
+variables in `.env`. The worker refuses to start if an account is invalid or a
+referenced variable is empty, and names the account and field.
 
-- `HEADLESS=false` shows the browser. If a login stops at a challenge, finish
+`/health` returns 200 when every account has a browser and an authenticated
+session, 503 otherwise (`/health?account=yes918-0038` for one).
+
+- `HEADLESS=false` shows the browsers. If a login stops at a challenge, finish
   any permitted manual step in that window.
-- Each provider's session lives in `runtime/profiles/<provider>` (gitignored)
+- Each account's session lives in `runtime/profiles/<account>` (gitignored)
   and survives restarts. Delete the folder to force a fresh login.
-- `<PROVIDER>_PROXY_SERVER` routes that provider's browser through a proxy.
-  Use a **static** IP; rotating IPs break logins and trigger WAF blocks.
+- A `proxy` must be a **static** IP; rotating IPs break logins and trigger WAF blocks.
 
 ## API
 
@@ -49,17 +72,17 @@ authenticated session, 503 otherwise (`/health?provider=yes918` for one).
 ```json
 {
   "operationId": "uuid (one per attempt, from the caller)",
-  "provider": "yes918",
-  "operation": "createPlayer",
-  "fingerprint": "sha256 hex of the caller's request data",
-  "params": { "amount": "10.00" }
+  "account": "yes918-0038",
+  "operation": "setScore",
+  "fingerprint": "sha256 hex of the caller's request data, including the account",
+  "params": { "playerId": "01000048805", "amount": "10.00" }
 }
 ```
 
 Response:
 
 ```json
-{ "operationId": "…", "outcome": "succeeded", "result": { "playerId": "…", "password": "…", "score": "10.00" } }
+{ "operationId": "…", "outcome": "succeeded", "result": { … } }
 { "operationId": "…", "outcome": "failed",  "error": { "code": "…", "message": "…" } }
 { "operationId": "…", "outcome": "unknown", "error": { "code": "…", "message": "…" } }
 ```
@@ -70,24 +93,52 @@ Response:
 | `failed` | Nothing changed on the portal; safe to try again |
 | `unknown` | The change may have happened: check the portal by hand, never retry blindly |
 
-Unknown fields, providers or operations are rejected. Repeating a finished
-`operationId` returns the stored answer instead of acting twice. Each provider
+Unknown fields, accounts or operations are rejected. Repeating a finished
+`operationId` returns the stored answer instead of acting twice. Each account
 runs one operation at a time; with more than `MAX_WAITING` queued, new requests
 get `failed` / `busy` immediately.
 
-## Adding a provider or operation
+## Adding a login for an existing portal
 
-1. Create `src/providers/<key>/index.js` exporting `createProvider()` that
-   returns `{ key, proxy, ensureLoggedIn(page, config), operations }`.
-   Read settings from `<KEY>_*` environment variables.
-2. Register it in `src/providers/index.js`.
-3. Each operation provides:
-   - `validate(params)`: return an error code for anything unexpected.
-   - `run({ session, params, ctx })`: use `session.pageFetch()` for same-origin
-     portal calls. Call `ctx.assertCanSubmit()` immediately before the request
-     that changes the portal. Throw `failed(...)` only when the portal certainly
-     did not change, and `unknown(...)` for anything after submission that is
-     not an explicit rejection.
+1. Add the secrets to `.env` and an entry to `accounts.json`.
+2. Restart the worker and check `/health?account=<key>`.
+3. In Maxis6, add the game to `config/botgames.php` and run
+   `php artisan db:seed --class=BotGameSeeder`.
+
+## Adding a portal
+
+1. **Inspect the portal read-only first.** List the endpoints, form fields,
+   success answers and report tables. Never click anything that changes data.
+2. **Create `src/portals/<name>/`** with an `index.js` exporting:
+   - `credentials`: `{ required: [...], optional: [...] }` credential field names
+   - `validateSettings(settings, credentials)`: normalized settings; throw `Error` on bad input
+   - `createPortal(account)`: `{ ensureLoggedIn(page, config), operations }`
+   Register it in `src/portals/index.js`.
+3. **Operations** are `async ({ session, params, ctx }) => result`, keyed by
+   names from `src/core/operations.js`. Params arrive validated.
+   - Reads use `readJson` / `readPage` from `src/core/portal-http.js`. They
+     only ever throw `failed(...)`.
+   - Changes use `submitOnce` from `src/core/submit.js` with a `classify`
+     function: `{ ok: value }` for confirmed success, `{ rejected: message }`
+     only when the portal explicitly refused, `null` for anything unclear.
+     Never send a change any other way, and never retry after it.
+   - Do checks that can fail predictably (player disabled, balance too low)
+     *before* `submitOnce`, so they are confirmed failures.
+4. **Parse report pages** with `session.parseHtml(html, extractor, arg)`.
+   Extractors are self-contained functions (no imports or closures) that run
+   in the browser. Test them in `test/` against saved pages that contain no
+   passwords or tokens.
+5. Add an account, check `/health`, run the reads, and test one small deposit
+   and withdrawal only with approval.
+
+## Tests
+
+```sh
+npm test
+```
+
+Covers operation params, cents maths, `submitOnce` outcomes, the accounts
+loader and the yes918 page extractors (run in headless Chromium).
 
 ## Production
 

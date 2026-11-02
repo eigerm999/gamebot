@@ -3,15 +3,20 @@ import { chromium } from 'playwright';
 import { OperationError, failed, log, redact } from './errors.js';
 
 /**
- * One persistent browser profile per provider account. The browser keeps the
- * portal's cookies and WAF tokens in its profile; nothing here reads or returns
- * cookie values. Callers serialize use through the provider's SerialQueue.
+ * One persistent browser profile per account. The browser keeps the portal's
+ * cookies and WAF tokens in its profile; nothing here reads or returns cookie
+ * values. Callers serialize use through the account's SerialQueue.
  */
 export class BrowserSession {
-  constructor(provider, config) {
-    this.provider = provider;
+  /**
+   * @param account loaded account ({ key, proxy, ... })
+   * @param portal  the account's portal instance ({ ensureLoggedIn })
+   */
+  constructor(account, portal, config) {
+    this.account = account;
+    this.portal = portal;
     this.config = config;
-    this.profileDir = path.join(config.profileRoot, provider.key);
+    this.profileDir = path.join(config.profileRoot, account.key);
     this.context = null;
     this.page = null;
     this.authenticated = false;
@@ -31,7 +36,7 @@ export class BrowserSession {
       headless: this.config.headless,
       viewport: { width: 1280, height: 800 },
       acceptDownloads: false,
-      ...(this.provider.proxy ? { proxy: this.provider.proxy } : {}),
+      ...(this.account.proxy ? { proxy: this.account.proxy } : {}),
     });
     this.context.setDefaultNavigationTimeout(this.config.navTimeoutMs);
     this.context.setDefaultTimeout(this.config.navTimeoutMs);
@@ -54,23 +59,35 @@ export class BrowserSession {
     }
   }
 
-  /** Confirm or restore the provider login. Safe to call before every operation. */
+  /** Confirm or restore the portal login. Safe to call before every operation. */
   async ensureSession() {
     try {
       await this.start();
-      await this.provider.ensureLoggedIn(this.page, this.config);
+      await this.portal.ensureLoggedIn(this.page, this.config);
       this.authenticated = true;
       this.lastErrorCode = null;
     } catch (error) {
       this.authenticated = false;
       if (!(error instanceof OperationError)) {
         // First line of a Playwright error names the failing step (e.g. a timeout); no credentials.
-        log('session_error', { provider: this.provider.key, detail: redact(String(error?.message ?? error).split('\n')[0]) });
+        log('session_error', { account: this.account.key, detail: redact(String(error?.message ?? error).split('\n')[0]) });
       }
       const sessionError = error instanceof OperationError ? error : failed('session_unavailable', 'Portal session could not be established', { retryable: true });
       this.lastErrorCode = sessionError.code;
       throw sessionError;
     }
+  }
+
+  /**
+   * Parses portal HTML with the browser's DOMParser and runs a pure extractor
+   * on it. The parsed document is inert: its scripts never run.
+   */
+  async parseHtml(html, extractor, arg = null) {
+    // One CDP-evaluated expression: the extractor is our own code, html and arg are JSON data.
+    const expression =
+      `(() => { const doc = new DOMParser().parseFromString(${JSON.stringify(html)}, 'text/html');` +
+      ` return (${extractor.toString()})(doc, ${JSON.stringify(arg)}); })()`;
+    return this.page.evaluate(expression);
   }
 
   markLoggedOut(code) {

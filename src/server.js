@@ -1,15 +1,17 @@
 import http from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { config } from './config.js';
-import { OperationError, failed, log } from './core/errors.js';
+import { OperationError, failed, log, redact, unknown } from './core/errors.js';
 import { SerialQueue } from './core/queue.js';
 import { BrowserSession } from './core/session.js';
-import { OPERATIONS, loadProviders } from './providers/index.js';
+import { OPERATIONS } from './core/operations.js';
+import { loadAccounts } from './accounts.js';
+import { PORTALS } from './portals/index.js';
 
 /**
  * Loopback-only worker. Exposes exactly:
- *   GET  /health          readiness per provider, no secrets
- *   POST /v1/operations   { operationId, provider, operation, fingerprint, params } with a bearer secret
+ *   GET  /health          readiness per account, no secrets
+ *   POST /v1/operations   { operationId, account, operation, fingerprint, params } with a bearer secret
  *
  * Logs only operation IDs, outcomes and error codes: never bodies, passwords,
  * cookies, authorization headers, page HTML or screenshots.
@@ -17,17 +19,18 @@ import { OPERATIONS, loadProviders } from './providers/index.js';
 
 const MAX_BODY_BYTES = 8192;
 const MAX_REMEMBERED_OPERATIONS = 1000;
-const REQUEST_FIELDS = ['fingerprint', 'operation', 'operationId', 'params', 'provider'];
+const REQUEST_FIELDS = ['account', 'fingerprint', 'operation', 'operationId', 'params'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FINGERPRINT = /^[0-9a-f]{64}$/;
 const SESSION_UNAVAILABLE = ['session_unavailable', 'login_rejected', 'login_form_missing', 'login_step2_missing'];
 
-// provider key -> { provider, session, queue }
+// account key -> { account, portal, session, queue }. Each account is isolated:
+// its own browser profile, login and queue.
 const workers = new Map(
-  loadProviders(config.providers).map((provider) => [
-    provider.key,
-    { provider, session: new BrowserSession(provider, config), queue: new SerialQueue(config.maxWaiting) },
-  ])
+  loadAccounts(config.accountsFile, PORTALS).map((account) => {
+    const portal = PORTALS[account.portal].createPortal(account);
+    return [account.key, { account, portal, session: new BrowserSession(account, portal, config), queue: new SerialQueue(config.maxWaiting) }];
+  })
 );
 
 // operationId -> { fingerprint, done, status, body }. In memory: a restart forgets
@@ -90,17 +93,17 @@ function validate(body) {
   if (typeof body.fingerprint !== 'string' || !FINGERPRINT.test(body.fingerprint)) {
     return 'invalid_fingerprint';
   }
-  const worker = workers.get(body.provider);
+  const worker = workers.get(body.account);
   if (!worker) {
-    return 'unknown_provider';
+    return 'unknown_account';
   }
-  if (!OPERATIONS.includes(body.operation) || !worker.provider.operations[body.operation]) {
+  if (!Object.hasOwn(OPERATIONS, body.operation) || typeof worker.portal.operations[body.operation] !== 'function') {
     return 'unsupported_operation';
   }
   if (!body.params || typeof body.params !== 'object' || Array.isArray(body.params)) {
     return 'invalid_params';
   }
-  return worker.provider.operations[body.operation].validate(body.params);
+  return OPERATIONS[body.operation].validate(body.params, worker.account.limits);
 }
 
 function remember(operationId, entry) {
@@ -110,8 +113,14 @@ function remember(operationId, entry) {
   }
 }
 
+function workerFault(error, submitted, request) {
+  // First line only: Playwright messages name the failing step; never bodies or credentials.
+  log('worker_fault', { operationId: request.operationId, submitted, detail: redact(String(error?.message ?? error).split('\n')[0]) });
+  return submitted ? unknown('worker_fault', 'Unexpected worker error after submission') : failed('worker_fault', 'Unexpected worker error before submission');
+}
+
 async function runOperation(worker, request, startedAt, clientGone) {
-  const operation = worker.provider.operations[request.operation];
+  const operation = worker.portal.operations[request.operation];
   let submitted = false;
 
   const ctx = {
@@ -125,7 +134,7 @@ async function runOperation(worker, request, startedAt, clientGone) {
         throw failed('deadline_exceeded', 'Pre-submission steps took too long');
       }
       submitted = true;
-      log('submit', { operationId: request.operationId, provider: worker.provider.key, operation: request.operation });
+      log('submit', { operationId: request.operationId, account: worker.account.key, operation: request.operation });
     },
   };
 
@@ -133,8 +142,10 @@ async function runOperation(worker, request, startedAt, clientGone) {
   for (let attempt = 1; ; attempt++) {
     try {
       await worker.session.ensureSession();
-      return await operation.run({ session: worker.session, params: request.params, ctx });
-    } catch (error) {
+      return await operation({ session: worker.session, params: request.params, ctx });
+    } catch (caught) {
+      // A bug or unexpected error: before submission nothing changed on the portal.
+      const error = caught instanceof OperationError ? caught : workerFault(caught, submitted, request);
       const retryable = error instanceof OperationError && error.outcome === 'failed' && error.retryable && !submitted && attempt === 1;
       if (!retryable) {
         throw error;
@@ -189,7 +200,7 @@ async function handleOperation(req, res) {
   }
   remember(operationId, { fingerprint: request.fingerprint, done: false });
 
-  const worker = workers.get(request.provider);
+  const worker = workers.get(request.account);
   let status;
   let body;
   try {
@@ -209,7 +220,7 @@ async function handleOperation(req, res) {
 
   log('operation_result', {
     operationId,
-    provider: request.provider,
+    account: request.account,
     operation: request.operation,
     outcome: body.outcome,
     code: body.error?.code ?? null,
@@ -225,12 +236,13 @@ async function handleOperation(req, res) {
 }
 
 function handleHealth(res, only) {
-  const providers = {};
-  for (const [key, { session, queue }] of workers) {
+  const accounts = {};
+  for (const [key, { account, session, queue }] of workers) {
     if (only && key !== only) {
       continue;
     }
-    providers[key] = {
+    accounts[key] = {
+      portal: account.portal,
       browser: session.browserReady,
       session: session.authenticated,
       busy: queue.busy,
@@ -238,19 +250,19 @@ function handleHealth(res, only) {
       lastError: session.lastErrorCode,
     };
   }
-  if (only && !providers[only]) {
-    send(res, 404, { error: { code: 'unknown_provider', message: 'Unknown provider' } });
+  if (only && !accounts[only]) {
+    send(res, 404, { error: { code: 'unknown_account', message: 'Unknown account' } });
     return;
   }
-  const ready = Object.values(providers).every((p) => p.browser && p.session);
-  send(res, ready ? 200 : 503, { process: 'ready', headless: config.headless, providers });
+  const ready = Object.values(accounts).every((a) => a.browser && a.session);
+  send(res, ready ? 200 : 503, { process: 'ready', headless: config.headless, accounts });
 }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
 
   if (req.method === 'GET' && url.pathname === '/health') {
-    handleHealth(res, url.searchParams.get('provider'));
+    handleHealth(res, url.searchParams.get('account'));
   } else if (req.method === 'POST' && url.pathname === '/v1/operations') {
     handleOperation(req, res).catch(() => send(res, 500, { outcome: 'unknown', error: { code: 'worker_fault', message: 'Unexpected worker error' } }));
   } else {
@@ -261,14 +273,14 @@ server.requestTimeout = 120000;
 server.headersTimeout = 10000;
 
 server.listen(config.port, config.host, () => {
-  log('listening', { host: config.host, port: config.port, headless: config.headless, providers: [...workers.keys()] });
+  log('listening', { host: config.host, port: config.port, headless: config.headless, accounts: [...workers.keys()] });
 
-  // Login check at startup; failures only mark that provider not ready.
+  // Login check at startup; failures only mark that account not ready.
   for (const [key, { session, queue }] of workers) {
     queue
       .runInternal(() => session.ensureSession())
-      .then(() => log('session_ready', { provider: key }))
-      .catch((error) => log('session_not_ready', { provider: key, code: error.code ?? 'unknown' }));
+      .then(() => log('session_ready', { account: key }))
+      .catch((error) => log('session_not_ready', { account: key, code: error.code ?? 'unknown' }));
   }
 });
 

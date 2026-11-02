@@ -1,0 +1,29 @@
+{
+  "yes918-0038": {
+    "portal": "yes918",
+    "baseUrl": "https://example-yes918-portal.invalid",
+    "credentials": {
+      "username": "YES918_0038_USERNAME",
+      "password": "YES918_0038_PASSWORD",
+      "password2": "YES918_0038_PASSWORD2"
+    },
+    "limits": { "maxInitialScore": "50", "maxSetScore": "1000" },
+    "settings": { "homePath": "/search" },
+    "proxy": null
+  },
+  "yes918-0039": {
+    "portal": "yes918",
+    "baseUrl": "https://example-yes918-portal.invalid",
+    "credentials": {
+      "username": "YES918_0039_USERNAME",
+      "password": "YES918_0039_PASSWORD"
+    },
+    "limits": { "maxInitialScore": "50", "maxSetScore": "1000" },
+    "settings": { "homePath": "/search" },
+    "proxy": {
+      "server": "YES918_0039_PROXY_SERVER",
+      "username": "YES918_0039_PROXY_USERNAME",
+      "password": "YES918_0039_PROXY_PASSWORD"
+    }
+  }
+}

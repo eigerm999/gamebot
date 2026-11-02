@@ -1,6 +1,11 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * Worker-wide settings from the environment. Portal logins live in
+ * accounts.json (see src/accounts.js); their secrets stay in .env.
+ */
+
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export function required(name) {
@@ -24,36 +29,18 @@ export function positiveInt(name, fallback) {
   return value;
 }
 
-/** Optional proxy for one provider's browser, e.g. a static Webshare IP. */
-export function proxyFromEnv(prefix) {
-  const server = optional(`${prefix}_PROXY_SERVER`, '');
-  if (server === '') {
-    return null;
-  }
-  return {
-    server,
-    username: optional(`${prefix}_PROXY_USERNAME`, undefined),
-    password: optional(`${prefix}_PROXY_PASSWORD`, undefined),
-  };
-}
-
 function loadConfig() {
   const secret = required('WORKER_SECRET');
   if (secret.length < 32) {
     throw new Error('WORKER_SECRET must be at least 32 characters');
   }
 
-  const providers = optional('PROVIDERS', 'yes918')
-    .split(',')
-    .map((key) => key.trim())
-    .filter(Boolean);
-
   return Object.freeze({
     host: '127.0.0.1', // loopback only; expose remotely through an HTTPS reverse proxy
     port: positiveInt('WORKER_PORT', 8918),
     secret,
-    providers,
 
+    accountsFile: path.resolve(ROOT, optional('ACCOUNTS_FILE', 'accounts.json')),
     headless: optional('HEADLESS', 'false').toLowerCase() === 'true',
     profileRoot: path.resolve(ROOT, optional('PROFILE_ROOT', 'runtime/profiles')),
 
