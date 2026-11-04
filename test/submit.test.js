@@ -58,6 +58,34 @@ test('submitOnce: confirmed success returns the classified value and sends once'
   assert.equal(session.calls[0].method, 'POST');
 });
 
+test('submitOnce: a custom sender is called exactly once after the deadline check', async () => {
+  const session = fakeSession({ text: '{"error":0}' });
+  const ctx = fakeCtx();
+  let calls = 0;
+  const result = await submitOnce(session, ctx, {
+    path: '/encrypted', code: 'x', classify,
+    send: async (request) => {
+      calls++;
+      assert.equal(ctx.asserted, 1);
+      assert.equal(request.path, '/encrypted');
+      return { status: 200, ok: true, finalPath: '/encrypted', text: '{"error":0,"secure":true}' };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(session.calls.length, 0);
+  assert.equal(result.secure, true);
+});
+
+test('submitOnce: custom sender is not called when submission is refused', async () => {
+  let calls = 0;
+  const result = await outcome(submitOnce(fakeSession({ text: '{}' }), fakeCtx({ refuse: true }), {
+    path: '/encrypted', code: 'x', classify,
+    send: async () => { calls++; return { status: 200, ok: true, text: '{"error":0}' }; },
+  }));
+  assert.deepEqual(result, { outcome: 'failed', code: 'client_gone' });
+  assert.equal(calls, 0);
+});
+
 test('submitOnce: explicit rejection is failed', async () => {
   const result = await outcome(submitOnce(fakeSession({ text: '{"error":5,"msg":"no"}' }), fakeCtx(), { path: '/p', code: 'x', classify }));
   assert.deepEqual(result, { outcome: 'failed', code: 'x_rejected' });

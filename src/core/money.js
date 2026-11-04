@@ -36,6 +36,17 @@ export function shortAmount(amount) {
   return amount.includes('.') ? amount.replace(/0+$/, '').replace(/\.$/, '') : amount;
 }
 
+export function portalToCents(value) {
+  const text = String(value).trim();
+  if (!PORTAL_NUMBER.test(text)) throw new Error(`Not a portal amount: ${text}`);
+  const negative = text.startsWith('-');
+  const [whole, fraction = ''] = text.replace(/^-/, '').split('.');
+  const padded = fraction + '000';
+  let cents = Number(whole) * 100 + Number(padded.slice(0, 2));
+  if (Number(padded[2]) >= 5) cents++;
+  return negative && cents !== 0 ? -cents : cents;
+}
+
 /** A portal-reported number as a clean string, or null. "-0" becomes "0". */
 export function cleanPortalNumber(value) {
   const text = String(value ?? '').trim();

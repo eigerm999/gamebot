@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cleanPortalNumber, fromCents, shortAmount, toCents } from '../src/core/money.js';
+import { cleanPortalNumber, fromCents, portalToCents, shortAmount, toCents } from '../src/core/money.js';
 
 test('toCents converts decimal strings without float drift', () => {
   assert.equal(toCents('10'), 1000);
@@ -11,6 +11,13 @@ test('toCents converts decimal strings without float drift', () => {
   assert.equal(toCents('-0'), 0);
   assert.throws(() => toCents('1e3'));
   assert.throws(() => toCents('abc'));
+});
+
+test('portalToCents rounds portal float noise to accounting cents', () => {
+  assert.equal(portalToCents('0.099999999999994'), 10);
+  assert.equal(portalToCents('1.005'), 101);
+  assert.equal(portalToCents('-1.005'), -101);
+  assert.equal(portalToCents('-0'), 0);
 });
 
 test('fromCents formats two decimals with sign', () => {

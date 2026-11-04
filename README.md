@@ -23,17 +23,17 @@ Params are defined once in `src/core/operations.js` and are the same for every
 portal. A portal that does not implement an operation rejects it with
 `unsupported_operation`.
 
-| Operation | Params | yes918 |
-| --- | --- | --- |
-| `createPlayer` | `amount` | ✅ |
-| `setScore` | `playerId`, `amount` (`"10.00"` deposits, `"-10.00"` withdraws) | ✅ |
-| `resetPassword` | `playerId` | ✅ |
-| `disablePlayer` | `playerId`, `enable` | ✅ |
-| `kickPlayer` | `playerId` | ✅ |
-| `playerInfo` | `playerId` | ✅ read-only |
-| `agentBalance` | none | ✅ read-only |
-| `gameLog` | `playerId`, `date`, `page` | ✅ one day per call; the portal refuses old dates |
-| `scoreLog` | `playerId`, `from`, `to`, `page` | ✅ up to 31 days, 50 rows per page |
+| Operation | Params | yes918 | wudi |
+| --- | --- | --- | --- |
+| `createPlayer` | `amount` | ✅ | ✅ amount must be `0` |
+| `setScore` | `playerId`, `amount` (`"10.00"` deposits, `"-10.00"` withdraws) | ✅ | ✅ |
+| `resetPassword` | `playerId` | ✅ | ✅ |
+| `disablePlayer` | `playerId`, `enable` | ✅ | ✅ |
+| `kickPlayer` | `playerId` | ✅ | ✅ |
+| `playerInfo` | `playerId` | ✅ read-only | ✅ read-only |
+| `agentBalance` | none | ✅ read-only | ✅ read-only |
+| `gameLog` | `playerId`, `date`, `page` | ✅ one day per call; the portal refuses old dates | ✅ net win/loss in Win column |
+| `scoreLog` | `playerId`, `from`, `to`, `page` | ✅ up to 31 days, 50 rows per page | ✅ direct credit/debit |
 
 Each account's `limits` are per transaction and enforced by the worker even if
 the caller sends more: `maxInitialScore` caps one Create ID, `maxSetScore` caps
@@ -145,3 +145,17 @@ loader and the yes918 page extractors (run in headless Chromium).
 Run on a VPS (not shared hosting) under systemd or PM2 with `HEADLESS=true`.
 The worker listens on `127.0.0.1` only; expose it to Laravel through an HTTPS
 reverse proxy (e.g. Caddy) restricted to the Laravel server's IP.
+
+## Wudi note
+
+Wudi modifying calls are encrypted by its frontend. The plugin dynamically uses
+the loaded portal Axios client; it never copies or bypasses the encryption. If
+Wudi enables CAPTCHA, use `HEADLESS=false` to complete it manually once.
+Create ID accepts amount 0 only; use Set Score for the first deposit.
+
+Create identities are saved before submission in `runtime/create-identities`
+(or `IDENTITY_ROOT`). Keep this directory across worker restarts. The authenticated
+`GET /v1/operations/{operationId}/identity` endpoint returns only the account and
+generated player ID for reconciliation; it never stores or returns passwords.
+An existing identity prevents a create operation from being submitted again after
+a restart. A saved identity alone does not prove that creation succeeded.

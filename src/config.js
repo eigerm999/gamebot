@@ -43,6 +43,7 @@ function loadConfig() {
     accountsFile: path.resolve(ROOT, optional('ACCOUNTS_FILE', 'accounts.json')),
     headless: optional('HEADLESS', 'false').toLowerCase() === 'true',
     profileRoot: path.resolve(ROOT, optional('PROFILE_ROOT', 'runtime/profiles')),
+    identityRoot: path.resolve(ROOT, optional('IDENTITY_ROOT', 'runtime/create-identities')),
 
     navTimeoutMs: positiveInt('NAV_TIMEOUT_MS', 60000),
     fetchTimeoutMs: positiveInt('FETCH_TIMEOUT_MS', 15000),

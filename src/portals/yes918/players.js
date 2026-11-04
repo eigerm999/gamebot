@@ -39,6 +39,7 @@ export function playerOperations(site) {
     async createPlayer({ session, params, ctx }) {
       const playerId = await randomPlayerId(session, ctx.config);
       const password = generatePlayerPassword();
+      await ctx.recordCreateIdentity(playerId);
 
       const json = await submitOnce(session, ctx, {
         path: `/playerlist/createnew?game=${GAME}`,

@@ -1,4 +1,5 @@
 import * as yes918 from './yes918/index.js';
+import * as wudi from './wudi/index.js';
 
 /**
  * Portal types by name (the "portal" field in accounts.json). Each module exports:
@@ -13,4 +14,5 @@ import * as yes918 from './yes918/index.js';
  */
 export const PORTALS = Object.freeze({
   yes918,
+  wudi,
 });

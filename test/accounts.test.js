@@ -39,6 +39,24 @@ test('null limits mean no per-transaction limit; a missing limit is still an err
   assert.throws(() => load({ a: base({ limits: { maxInitialScore: '50' } }) }), /limits.maxSetScore is required/);
 });
 
+test('loads a Wudi account with zero initial score and unlimited set score', () => {
+  const [account] = load(
+    {
+      'wudi-spadik': {
+        portal: 'wudi', baseUrl: 'https://wdbo.wg365.xyz',
+        credentials: { username: 'U1', password: 'P1' },
+        limits: { maxInitialScore: '0', maxSetScore: null },
+        settings: { homePath: '/user/front', playerPrefix: 'wd', scoreRemark: 'maxis6' },
+        proxy: null,
+      },
+    }
+  );
+  assert.equal(account.portal, 'wudi');
+  assert.equal(account.limits.maxInitialScoreCents, 0);
+  assert.equal(account.limits.maxSetScoreCents, Infinity);
+  assert.equal(account.settings.playerPrefix, 'wd');
+});
+
 test('two logins on one portal are two accounts', () => {
   const accounts = load({
     'yes918-0038': base(),

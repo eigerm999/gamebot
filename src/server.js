@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { CreateIdentities } from './core/create-identities.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { config } from './config.js';
 import { OperationError, failed, log, redact, unknown } from './core/errors.js';
@@ -22,7 +23,7 @@ const MAX_REMEMBERED_OPERATIONS = 1000;
 const REQUEST_FIELDS = ['account', 'fingerprint', 'operation', 'operationId', 'params'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FINGERPRINT = /^[0-9a-f]{64}$/;
-const SESSION_UNAVAILABLE = ['session_unavailable', 'login_rejected', 'login_form_missing', 'login_step2_missing'];
+const SESSION_UNAVAILABLE = ['session_unavailable', 'login_rejected', 'login_form_missing', 'login_step2_missing', 'login_challenge'];
 
 // account key -> { account, portal, session, queue }. Each account is isolated:
 // its own browser profile, login and queue.
@@ -36,6 +37,7 @@ const workers = new Map(
 // operationId -> { fingerprint, done, status, body }. In memory: a restart forgets
 // completed operations, but Laravel never resends an operation ID anyway.
 const operations = new Map();
+const identities = new CreateIdentities(config.identityRoot);
 
 function digest(value) {
   return createHash('sha256').update(String(value)).digest();
@@ -125,6 +127,12 @@ async function runOperation(worker, request, startedAt, clientGone) {
 
   const ctx = {
     config,
+    async recordCreateIdentity(playerId) {
+      if (clientGone() || Date.now() - startedAt > config.submitDeadlineMs) {
+        throw failed('deadline_exceeded', 'Caller deadline passed before create');
+      }
+      await identities.record(request.operationId, worker.account.key, playerId);
+    },
     // Never start a portal change that the caller may already have given up on.
     assertCanSubmit() {
       if (clientGone()) {
@@ -198,7 +206,15 @@ async function handleOperation(req, res) {
     }
     return;
   }
+  // Claim the ID before the first asynchronous read so concurrent requests
+  // cannot both enter the queue under the same operation ID.
   remember(operationId, { fingerprint: request.fingerprint, done: false });
+  if (request.operation === 'createPlayer' && await identities.read(operationId)) {
+    const body = outcomeBody(operationId, 'unknown', 'create_already_prepared', 'Create identity exists; reconcile before retrying');
+    remember(operationId, { fingerprint: request.fingerprint, done: true, status: 409, body });
+    send(res, 409, body);
+    return;
+  }
 
   const worker = workers.get(request.account);
   let status;
@@ -263,6 +279,13 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/health') {
     handleHealth(res, url.searchParams.get('account'));
+  } else if (req.method === 'GET' && /^\/v1\/operations\/[0-9a-f-]+\/identity$/i.test(url.pathname)) {
+    if (!authorized(req)) { send(res, 401, { error: { code: 'unauthorized' } }); return; }
+    const operationId = url.pathname.split('/')[3];
+    if (!UUID.test(operationId)) { send(res, 400, { error: { code: 'invalid_operation_id' } }); return; }
+    identities.read(operationId)
+      .then((identity) => send(res, identity ? 200 : 404, identity ?? { error: { code: 'identity_not_found' } }))
+      .catch(() => send(res, 500, { error: { code: 'identity_unavailable' } }));
   } else if (req.method === 'POST' && url.pathname === '/v1/operations') {
     handleOperation(req, res).catch(() => send(res, 500, { outcome: 'unknown', error: { code: 'worker_fault', message: 'Unexpected worker error' } }));
   } else {

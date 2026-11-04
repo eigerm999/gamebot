@@ -7,8 +7,13 @@
       "password": "YES918_0038_PASSWORD",
       "password2": "YES918_0038_PASSWORD2"
     },
-    "limits": { "maxInitialScore": "50", "maxSetScore": "1000" },
-    "settings": { "homePath": "/search" },
+    "limits": {
+      "maxInitialScore": "50",
+      "maxSetScore": "1000"
+    },
+    "settings": {
+      "homePath": "/search"
+    },
     "proxy": null
   },
   "yes918-0039": {
@@ -18,12 +23,35 @@
       "username": "YES918_0039_USERNAME",
       "password": "YES918_0039_PASSWORD"
     },
-    "limits": { "maxInitialScore": "50", "maxSetScore": "1000" },
-    "settings": { "homePath": "/search" },
+    "limits": {
+      "maxInitialScore": "50",
+      "maxSetScore": "1000"
+    },
+    "settings": {
+      "homePath": "/search"
+    },
     "proxy": {
       "server": "YES918_0039_PROXY_SERVER",
       "username": "YES918_0039_PROXY_USERNAME",
       "password": "YES918_0039_PROXY_PASSWORD"
     }
+  },
+  "wudi-spadik": {
+    "portal": "wudi",
+    "baseUrl": "https://wdbo.wg365.xyz",
+    "credentials": {
+      "username": "WUDI_SPADIK_USERNAME",
+      "password": "WUDI_SPADIK_PASSWORD"
+    },
+    "limits": {
+      "maxInitialScore": "0",
+      "maxSetScore": null
+    },
+    "settings": {
+      "homePath": "/user/front",
+      "playerPrefix": "wd",
+      "scoreRemark": "maxis6"
+    },
+    "proxy": null
   }
 }
