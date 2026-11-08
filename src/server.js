@@ -265,6 +265,7 @@ function handleHealth(res, only) {
       busy: queue.busy,
       waiting: queue.waiting,
       lastError: session.lastErrorCode,
+      checkedAt: session.checkedAt, // last login check (startup, operation or periodic)
     };
   }
   if (only && !accounts[only]) {
@@ -306,7 +307,37 @@ server.listen(config.port, config.host, () => {
       .then(() => log('session_ready', { account: key }))
       .catch((error) => log('session_not_ready', { account: key, code: error.code ?? 'unknown' }));
   }
+
+  if (config.sessionCheckMinutes > 0) {
+    sessionTimer = setInterval(checkSessions, config.sessionCheckMinutes * 60000);
+    sessionTimer.unref();
+  }
 });
+
+/**
+ * Periodic login check: asks each portal whether the login is still valid and
+ * logs in again if not, so the bot stays ready between operations. Runs
+ * through the account queue, never alongside an operation; an account that is
+ * busy or has work waiting is skipped this round (that work checks the login
+ * itself). Read-only: it never submits anything to a portal.
+ */
+let sessionTimer = null;
+function checkSessions() {
+  for (const [key, { session, queue }] of workers) {
+    if (stopping || queue.busy || queue.waiting > 0) {
+      continue;
+    }
+    const wasReady = session.authenticated;
+    queue
+      .runInternal(() => session.ensureSession({ verify: true }))
+      .then(() => {
+        if (!wasReady) {
+          log('session_ready', { account: key, by: 'session_check' });
+        }
+      })
+      .catch((error) => log('session_not_ready', { account: key, by: 'session_check', code: error.code ?? 'unknown' }));
+  }
+}
 
 let stopping = false;
 async function shutdown(signal) {
@@ -314,6 +345,7 @@ async function shutdown(signal) {
     return;
   }
   stopping = true;
+  clearInterval(sessionTimer);
   log('shutdown', { signal });
   server.close();
   await Promise.all([...workers.values()].map(({ session }) => session.stop()));

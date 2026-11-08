@@ -90,8 +90,12 @@ export function createLogin(site) {
   }
 
   return {
-    async ensureLoggedIn(page, config) {
-      if (await isAuthenticated(page)) {
+    /**
+     * verify: reload the portal instead of trusting the current page. The
+     * page URL alone cannot tell that the portal ended the session.
+     */
+    async ensureLoggedIn(page, config, { verify = false } = {}) {
+      if (!verify && (await isAuthenticated(page))) {
         return;
       }
       // Wait for the DOM, not 'load': slow assets (VPN, proxy) can delay 'load' well past the form being usable.

@@ -29,6 +29,14 @@ export function positiveInt(name, fallback) {
   return value;
 }
 
+export function nonNegativeInt(name, fallback) {
+  const value = Number(optional(name, String(fallback)));
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${name} must be 0 or a positive integer`);
+  }
+  return value;
+}
+
 function loadConfig() {
   const secret = required('WORKER_SECRET');
   if (secret.length < 32) {
@@ -50,6 +58,8 @@ function loadConfig() {
     submitTimeoutMs: positiveInt('SUBMIT_TIMEOUT_MS', 30000),
     submitDeadlineMs: positiveInt('SUBMIT_DEADLINE_MS', 35000),
     maxWaiting: positiveInt('MAX_WAITING', 3),
+    // Background login check per account, in minutes; 0 turns it off.
+    sessionCheckMinutes: nonNegativeInt('SESSION_CHECK_MINUTES', 10),
   });
 }
 

@@ -21,6 +21,7 @@ export class BrowserSession {
     this.page = null;
     this.authenticated = false;
     this.lastErrorCode = null;
+    this.checkedAt = null;
   }
 
   get browserReady() {
@@ -59,15 +60,20 @@ export class BrowserSession {
     }
   }
 
-  /** Confirm or restore the portal login. Safe to call before every operation. */
-  async ensureSession() {
+  /**
+   * Confirm or restore the portal login. Safe to call before every operation.
+   * verify: ask the portal itself (the periodic session check uses this).
+   */
+  async ensureSession({ verify = false } = {}) {
     try {
       await this.start();
-      await this.portal.ensureLoggedIn(this.page, this.config);
+      await this.portal.ensureLoggedIn(this.page, this.config, { verify });
       this.authenticated = true;
       this.lastErrorCode = null;
+      this.checkedAt = new Date().toISOString();
     } catch (error) {
       this.authenticated = false;
+      this.checkedAt = new Date().toISOString();
       if (!(error instanceof OperationError)) {
         // First line of a Playwright error names the failing step (e.g. a timeout); no credentials.
         log('session_error', { account: this.account.key, detail: redact(String(error?.message ?? error).split('\n')[0]) });

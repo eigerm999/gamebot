@@ -59,6 +59,10 @@ referenced variable is empty, and names the account and field.
 `/health` returns 200 when every account has a browser and an authenticated
 session, 503 otherwise (`/health?account=yes918-0038` for one).
 
+- Every `SESSION_CHECK_MINUTES` (default 10, `0` = off) the worker asks each
+  portal whether its login is still valid and logs in again if not. Busy
+  accounts are skipped that round. `/health` shows `checkedAt`. Do not use a
+  bot's portal login by hand: the check will take the session back.
 - `HEADLESS=false` shows the browsers. If a login stops at a challenge, finish
   any permitted manual step in that window.
 - Each account's session lives in `runtime/profiles/<account>` (gitignored)
