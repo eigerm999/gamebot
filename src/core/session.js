@@ -36,6 +36,8 @@ export class BrowserSession {
     this.context = await chromium.launchPersistentContext(this.profileDir, {
       headless: this.config.headless,
       viewport: { width: 1280, height: 800 },
+      // Report parsing expects the portals' English labels; this sets the language preference only.
+      locale: 'en-US',
       acceptDownloads: false,
       ...(this.account.proxy ? { proxy: this.account.proxy } : {}),
     });

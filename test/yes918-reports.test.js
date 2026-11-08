@@ -83,6 +83,9 @@ test('score log: picks the right table and reads the page count from links', asy
 test('agent balance from the navigation bar', async () => {
   assert.equal(await session.parseHtml(GAMELOG, extractAgentBalance), '158146.9');
   assert.equal(await session.parseHtml('<html><body><p>nothing</p></body></html>', extractAgentBalance), null);
+  // Same navigation bar when the portal is switched to Chinese (live page, 2026-11-08).
+  const chinese = '<html><body><nav class="main-header navbar"><p class="border btn btn-primary text-s p-1 m-0"> 余额: 122358.9 </p></nav></body></html>';
+  assert.equal(await session.parseHtml(chinese, extractAgentBalance), '122358.9');
 });
 
 test('parsed pages are inert: their scripts never run', async () => {

@@ -33,10 +33,13 @@ export function extractLogTable(doc, { marker, columns }) {
   return { found: Boolean(table), rows, totalPages, portalError: /Error Getting Gamelog/i.test(clean(doc.body)) };
 }
 
-/** "Balance: 158146.9" in the navigation bar of every logged-in page. */
+/**
+ * "Balance: 158146.9" (English) or "余额: 122358.9" (Chinese) in the
+ * navigation bar of every logged-in page. The portal language is per session.
+ */
 export function extractAgentBalance(doc) {
   for (const node of doc.querySelectorAll('nav p, nav span, nav a, p')) {
-    const match = (node.textContent ?? '').replace(/\s+/g, ' ').match(/Balance:\s*(-?[\d,]+(?:\.\d+)?)/);
+    const match = (node.textContent ?? '').replace(/\s+/g, ' ').match(/(?:Balance|余额)\s*[:：]\s*(-?[\d,]+(?:\.\d+)?)/);
     if (match) {
       return match[1].replace(/,/g, '');
     }
