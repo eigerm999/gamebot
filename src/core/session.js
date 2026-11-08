@@ -67,7 +67,9 @@ export class BrowserSession {
   async ensureSession({ verify = false } = {}) {
     try {
       await this.start();
-      await this.portal.ensureLoggedIn(this.page, this.config, { verify });
+      // After markLoggedOut (e.g. a read got the login page) the open page can
+      // still look logged in, so the portal must be asked again.
+      await this.portal.ensureLoggedIn(this.page, this.config, { verify: verify || !this.authenticated });
       this.authenticated = true;
       this.lastErrorCode = null;
       this.checkedAt = new Date().toISOString();

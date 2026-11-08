@@ -40,6 +40,13 @@ test('session check passes verify to the portal and records the check time', asy
   await session.ensureSession({ verify: true });
   await session.ensureSession();
   assert.deepEqual(calls, [{ verify: true }, { verify: false }]);
+
+  // A read saw the login page: the retry must ask the portal, not trust the open page.
+  session.markLoggedOut('session_expired');
+  await session.ensureSession();
+  assert.deepEqual(calls.at(-1), { verify: true });
+  await session.ensureSession(); // logged in again: back to the fast path
+  assert.deepEqual(calls.at(-1), { verify: false });
   assert.equal(session.authenticated, true);
   assert.match(session.checkedAt, /^\d{4}-\d\d-\d\dT/);
 
