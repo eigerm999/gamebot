@@ -30,11 +30,7 @@
     "settings": {
       "homePath": "/search"
     },
-    "proxy": {
-      "server": "YES918_0039_PROXY_SERVER",
-      "username": "YES918_0039_PROXY_USERNAME",
-      "password": "YES918_0039_PROXY_PASSWORD"
-    }
+    "proxy": null
   },
   "wudi-spadik": {
     "portal": "wudi",

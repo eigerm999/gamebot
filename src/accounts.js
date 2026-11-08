@@ -13,6 +13,9 @@ import { AMOUNT, toCents } from './core/money.js';
  *     "proxy": null | { "server": "<ENV>", "username": "<ENV>", "password": "<ENV>" }
  *   }
  *
+ * Most setups use the shared proxy instead (PROXY_ACCOUNTS + PROXY_SERVER in
+ * .env, see loadSharedProxy) and keep "proxy": null here.
+ *
  * Secrets are referenced by environment variable name and never stored in the
  * file. Any problem stops the worker at startup with the account and field
  * named, instead of failing later during a money operation.
@@ -89,6 +92,23 @@ function loadLimits(key, limits) {
   return Object.freeze(result);
 }
 
+const PROXY_FIELDS = ['server', 'username', 'password'];
+const PROXY_SCHEMES = ['http:', 'https:', 'socks5:'];
+
+function checkProxyServer(key, field, server) {
+  let parsed;
+  try {
+    parsed = new URL(server);
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || !PROXY_SCHEMES.includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) {
+    throw new AccountError(key, `${field} must look like http://host:port (put the login in the username/password variables)`);
+  }
+  return server;
+}
+
+/** Account-specific proxy from accounts.json ("proxy": { "server": ENV, ... }). */
 function loadProxy(key, proxy, env) {
   if (proxy === null || proxy === undefined) {
     return null;
@@ -96,11 +116,59 @@ function loadProxy(key, proxy, env) {
   if (!isObject(proxy) || !('server' in proxy)) {
     throw new AccountError(key, 'proxy must be null or { "server": ENV, "username"?: ENV, "password"?: ENV }');
   }
+  for (const field of Object.keys(proxy)) {
+    if (!PROXY_FIELDS.includes(field)) {
+      throw new AccountError(key, `unknown field "proxy.${field}"`);
+    }
+  }
   return Object.freeze({
-    server: envValue(key, 'proxy.server', proxy.server, env),
+    server: checkProxyServer(key, `proxy.server (${proxy.server})`, envValue(key, 'proxy.server', proxy.server, env)),
     username: 'username' in proxy ? envValue(key, 'proxy.username', proxy.username, env) : undefined,
     password: 'password' in proxy ? envValue(key, 'proxy.password', proxy.password, env) : undefined,
   });
+}
+
+/**
+ * One shared proxy for the accounts listed in PROXY_ACCOUNTS (comma separated
+ * account keys). Everything else connects directly. Empty list = proxy off.
+ *
+ *   PROXY_ACCOUNTS=yes918-0038,wudi-spadik
+ *   PROXY_SERVER=http://host:port
+ *   PROXY_USERNAME=...   PROXY_PASSWORD=...
+ */
+function loadSharedProxy(env, keys) {
+  const listed = (env.PROXY_ACCOUNTS ?? '').split(',').map((k) => k.trim()).filter(Boolean);
+  if (listed.length === 0) {
+    return { proxy: null, accounts: new Set() };
+  }
+  for (const key of listed) {
+    if (!keys.includes(key)) {
+      throw new AccountError(null, `PROXY_ACCOUNTS: unknown account "${key}" (known: ${keys.join(', ')})`);
+    }
+  }
+  const server = (env.PROXY_SERVER ?? '').trim();
+  if (server === '') {
+    throw new AccountError(null, 'PROXY_ACCOUNTS is set but PROXY_SERVER is empty');
+  }
+  checkProxyServer(null, 'PROXY_SERVER', server);
+  const username = (env.PROXY_USERNAME ?? '').trim() || undefined;
+  const password = (env.PROXY_PASSWORD ?? '').trim() || undefined;
+  if (Boolean(username) !== Boolean(password)) {
+    throw new AccountError(null, 'PROXY_USERNAME and PROXY_PASSWORD must be set together');
+  }
+  return { proxy: Object.freeze({ server, username, password }), accounts: new Set(listed) };
+}
+
+function accountProxy(key, proxy, env, shared) {
+  const own = loadProxy(key, proxy, env);
+  if (!shared.accounts.has(key)) {
+    return own;
+  }
+  if (own) {
+    // Two proxies for one login would be ambiguous; make the operator pick one.
+    throw new AccountError(key, 'is in PROXY_ACCOUNTS and also has its own "proxy"; set "proxy": null or remove it from PROXY_ACCOUNTS');
+  }
+  return shared.proxy;
 }
 
 /**
@@ -120,6 +188,7 @@ export function loadAccounts(file, portals, env = process.env) {
     throw new AccountError(null, 'must be an object with at least one account');
   }
 
+  const shared = loadSharedProxy(env, Object.keys(raw));
   const logins = new Set();
   const accounts = Object.entries(raw).map(([key, entry]) => {
     if (!ACCOUNT_KEY.test(key)) {
@@ -176,7 +245,7 @@ export function loadAccounts(file, portals, env = process.env) {
       credentials,
       limits: loadLimits(key, entry.limits),
       settings: Object.freeze(settings),
-      proxy: loadProxy(key, entry.proxy, env),
+      proxy: accountProxy(key, entry.proxy, env, shared),
     });
   });
 

@@ -64,6 +64,12 @@ session, 503 otherwise (`/health?account=yes918-0038` for one).
 - Each account's session lives in `runtime/profiles/<account>` (gitignored)
   and survives restarts. Delete the folder to force a fresh login.
 - A `proxy` must be a **static** IP; rotating IPs break logins and trigger WAF blocks.
+- **Shared proxy:** set `PROXY_SERVER` (and `PROXY_USERNAME`/`PROXY_PASSWORD`)
+  once in `.env`, then list the accounts that should use it in
+  `PROXY_ACCOUNTS`, e.g. `PROXY_ACCOUNTS=yes918-0038,wudi-spadik`. Unlisted
+  accounts connect directly; an empty list turns the proxy off. Restart the
+  worker after changing. An account in the list must have `"proxy": null`.
+  `/health` shows `"proxy": true|false` per account, never the address.
 
 ## API
 

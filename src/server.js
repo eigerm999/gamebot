@@ -259,6 +259,7 @@ function handleHealth(res, only) {
     }
     accounts[key] = {
       portal: account.portal,
+      proxy: account.proxy !== null, // on/off only; never the address or login
       browser: session.browserReady,
       session: session.authenticated,
       busy: queue.busy,

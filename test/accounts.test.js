@@ -32,6 +32,37 @@ test('loads a valid account and resolves secrets from env', () => {
   assert.equal(account.proxy.server, 'http://1.2.3.4:8080');
 });
 
+test('PROXY_ACCOUNTS picks which accounts use the shared proxy', () => {
+  const two = {
+    a: base(),
+    b: base({ credentials: { username: 'U2', password: 'P2' } }),
+  };
+  const shared = { ...env, PROXY_SERVER: 'http://1.2.3.4:5965', PROXY_USERNAME: 'u', PROXY_PASSWORD: 'p' };
+
+  const [a, b] = load(two, { ...shared, PROXY_ACCOUNTS: ' b ' });
+  assert.equal(a.proxy, null); // not listed: direct
+  assert.deepEqual({ ...b.proxy }, { server: 'http://1.2.3.4:5965', username: 'u', password: 'p' });
+
+  const both = load(two, { ...shared, PROXY_ACCOUNTS: 'a,b' });
+  assert.ok(both.every((account) => account.proxy.server === 'http://1.2.3.4:5965'));
+
+  // Empty list = proxy off for everyone; the PROXY_* values may then be empty.
+  assert.ok(load(two, { ...env, PROXY_ACCOUNTS: '' }).every((account) => account.proxy === null));
+  assert.ok(load(two, env).every((account) => account.proxy === null));
+});
+
+test('shared proxy mistakes stop the worker at startup', () => {
+  const shared = { ...env, PROXY_SERVER: 'http://1.2.3.4:5965', PROXY_ACCOUNTS: 'a' };
+  assert.throws(() => load({ a: base() }, { ...shared, PROXY_ACCOUNTS: 'a,typo' }), /PROXY_ACCOUNTS: unknown account "typo"/);
+  assert.throws(() => load({ a: base() }, { ...env, PROXY_ACCOUNTS: 'a' }), /PROXY_SERVER is empty/);
+  assert.throws(() => load({ a: base() }, { ...shared, PROXY_USERNAME: 'u' }), /must be set together/);
+  for (const bad of ['1.2.3.4:5965', 'ftp://1.2.3.4:21', 'http://u:p@1.2.3.4:5965']) {
+    assert.throws(() => load({ a: base() }, { ...shared, PROXY_SERVER: bad }), /PROXY_SERVER must look like http:\/\/host:port/);
+  }
+  assert.throws(() => load({ a: base({ proxy: { server: 'PROXY' } }) }, shared), /also has its own "proxy"/);
+  assert.throws(() => load({ a: base({ proxy: { server: 'PROXY', rotate: 'X' } }) }), /unknown field "proxy.rotate"/);
+});
+
 test('null limits mean no per-transaction limit; a missing limit is still an error', () => {
   const [account] = load({ a: base({ limits: { maxInitialScore: null, maxSetScore: null } }) });
   assert.equal(account.limits.maxInitialScoreCents, Infinity);
