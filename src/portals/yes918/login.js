@@ -89,6 +89,28 @@ export function createLogin(site) {
     }
   }
 
+  // Pages already switched to English in this login session.
+  const english = new WeakSet();
+
+  /**
+   * Report pages are read by their English labels ("Begin Balance", "After
+   * Score"), and the portal language is per session. The portal's own "Eng"
+   * link (GET /lang/eng) is a display preference only; it changes no data.
+   */
+  async function useEnglish(page) {
+    if (english.has(page)) {
+      return;
+    }
+    await page.goto(origin + '/lang/eng', { waitUntil: 'domcontentloaded' });
+    if (!(await isAuthenticated(page))) {
+      await page.goto(origin + homePath, { waitUntil: 'domcontentloaded' });
+    }
+    if (!(await isAuthenticated(page))) {
+      throw failed('session_unavailable', 'Portal session was lost while selecting English');
+    }
+    english.add(page);
+  }
+
   return {
     /**
      * verify: reload the portal instead of trusting the current page. The
@@ -96,6 +118,7 @@ export function createLogin(site) {
      */
     async ensureLoggedIn(page, config, { verify = false } = {}) {
       if (!verify && (await isAuthenticated(page))) {
+        await useEnglish(page);
         return;
       }
       // Wait for the DOM, not 'load': slow assets (VPN, proxy) can delay 'load' well past the form being usable.
@@ -104,9 +127,12 @@ export function createLogin(site) {
         .waitForURL((url) => url.pathname.startsWith(homePath) || url.pathname.startsWith('/login'), { waitUntil: 'domcontentloaded' })
         .catch(() => {});
       if (await isAuthenticated(page)) {
+        await useEnglish(page);
         return;
       }
+      english.delete(page); // a new login session may start in another language
       await login(page, config);
+      await useEnglish(page);
     },
   };
 }

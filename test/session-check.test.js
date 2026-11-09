@@ -23,11 +23,31 @@ test('yes918: a normal check trusts the current page; verify asks the portal', a
 
   const trusted = homePage();
   await login.ensureLoggedIn(trusted, {});
-  assert.deepEqual(trusted.gotos, []);
+  assert.deepEqual(trusted.gotos, ['https://k1.example/lang/eng']); // English once per session
+  await login.ensureLoggedIn(trusted, {});
+  assert.deepEqual(trusted.gotos, ['https://k1.example/lang/eng']); // trusted again, nothing more
 
   const verified = homePage();
   await login.ensureLoggedIn(verified, {}, { verify: true });
-  assert.deepEqual(verified.gotos, ['https://k1.example/']);
+  assert.deepEqual(verified.gotos, ['https://k1.example/', 'https://k1.example/lang/eng']);
+});
+
+test('yes918: English is selected after a fresh login and the session must survive it', async () => {
+  const login = createLogin(site);
+
+  // /lang/eng redirects somewhere else: the bot returns to the home page.
+  const page = homePage();
+  page.goto = async (url) => {
+    page.gotos.push(url);
+    page.current = url.endsWith('/lang/eng') ? 'https://k1.example/' : 'https://k1.example/search';
+  };
+  await login.ensureLoggedIn(page, {});
+  assert.deepEqual(page.gotos, ['https://k1.example/lang/eng', 'https://k1.example/search']);
+
+  // Switching language lost the session: not ready, never reported as logged in.
+  const lost = homePage();
+  lost.goto = async (url) => { lost.gotos.push(url); lost.current = 'https://k1.example/login'; };
+  await assert.rejects(login.ensureLoggedIn(lost, {}), { code: 'session_unavailable' });
 });
 
 test('session check passes verify to the portal and records the check time', async () => {
