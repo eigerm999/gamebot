@@ -36,8 +36,30 @@ export function createLogin(site, request = wudiRequest) {
     }
   }
 
+  // Pages that already carry the English preference script.
+  const english = new WeakSet();
+
+  /**
+   * The Wudi app keeps its UI language in localStorage "language" (en-US for
+   * English, as chosen on its login page) and reads it when the app loads.
+   * Data is read from JSON fields, so this only makes the portal's own
+   * messages (e.g. rejection reasons shown to agents) English.
+   */
+  async function preferEnglish(page) {
+    if (english.has(page)) {
+      return;
+    }
+    await page.addInitScript((origin) => {
+      if (window.location.origin === origin && window.localStorage.getItem('language') !== 'en-US') {
+        window.localStorage.setItem('language', 'en-US');
+      }
+    }, site.origin);
+    english.add(page);
+  }
+
   return {
     async ensureLoggedIn(page, config) {
+      await preferEnglish(page);
       if (await authenticated(page, config)) {
         return;
       }

@@ -43,6 +43,7 @@ test('login never fills or clicks unless CAPTCHA endpoint explicitly succeeds wi
     };
     const page = {
       url: () => 'https://wdbo.wg365.xyz/login',
+      addInitScript: async () => {},
       goto: async () => {},
       locator: () => form,
       waitForLoadState: async () => {},
@@ -54,6 +55,31 @@ test('login never fills or clicks unless CAPTCHA endpoint explicitly succeeds wi
     assert.equal(fills, 0);
     assert.equal(clicks, 0);
   }
+});
+
+test('Wudi login prefers English once per page, only on the Wudi origin', async () => {
+  const scripts = [];
+  const page = {
+    url: () => 'https://wdbo.wg365.xyz/user/front',
+    addInitScript: async (fn, arg) => scripts.push([fn, arg]),
+  };
+  const ok = async () => ({ ok: true, status: 200, text: JSON.stringify({ code: 200 }) }); // already logged in
+  const login = createLogin({ origin: 'https://wdbo.wg365.xyz', credentials: { username: 'u', password: 'p' }, homePath: '/user/front' }, ok);
+  await login.ensureLoggedIn(page, { fetchTimeoutMs: 1000 });
+  await login.ensureLoggedIn(page, { fetchTimeoutMs: 1000 });
+  assert.equal(scripts.length, 1);
+
+  const [fn, origin] = scripts[0];
+  const run = (pageOrigin, stored) => {
+    const store = new Map(stored ? [['language', stored]] : []);
+    const saved = globalThis.window;
+    globalThis.window = { location: { origin: pageOrigin }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) } };
+    try { fn(origin); } finally { globalThis.window = saved; }
+    return store.get('language') ?? null;
+  };
+  assert.equal(run('https://wdbo.wg365.xyz', 'zh-CN'), 'en-US');
+  assert.equal(run('https://wdbo.wg365.xyz', null), 'en-US');
+  assert.equal(run('https://other.example', 'zh-CN'), 'zh-CN'); // never another site
 });
 
 test('generated Wudi credentials match portal rules', () => {
