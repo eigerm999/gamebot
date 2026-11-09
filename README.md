@@ -77,6 +77,16 @@ session, 503 otherwise (`/health?account=yes918-0038` for one).
 
 ## API
 
+- A change (create, set score, reset password, ...) that is not sent within
+  `SUBMIT_DEADLINE_MS` (default 35 s, counted from arrival, including queue
+  wait and re-login) is answered at once as `failed` / `deadline_exceeded`, and
+  it is never sent afterwards. Callers get a definite answer instead of a
+  timeout.
+- `GET /v1/operations/<operationId>` (same bearer secret) returns what this
+  process remembers: `{ "done": true, "outcome": "failed", "code": "deadline_exceeded" }`,
+  `{ "done": false }` while running, or 404 when unknown (e.g. after a
+  restart). Outcome and code only, never the result.
+
 `POST /v1/operations` with `Authorization: Bearer <WORKER_SECRET>`:
 
 ```json

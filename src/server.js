@@ -6,13 +6,16 @@ import { OperationError, failed, log, redact, unknown } from './core/errors.js';
 import { SerialQueue } from './core/queue.js';
 import { BrowserSession } from './core/session.js';
 import { OPERATIONS } from './core/operations.js';
+import { answerByDeadline, operationStatus } from './core/deadline.js';
 import { loadAccounts } from './accounts.js';
 import { PORTALS } from './portals/index.js';
 
 /**
  * Loopback-only worker. Exposes exactly:
- *   GET  /health          readiness per account, no secrets
- *   POST /v1/operations   { operationId, account, operation, fingerprint, params } with a bearer secret
+ *   GET  /health                       readiness per account, no secrets
+ *   POST /v1/operations                { operationId, account, operation, fingerprint, params } with a bearer secret
+ *   GET  /v1/operations/:id            remembered outcome of an operation (bearer secret)
+ *   GET  /v1/operations/:id/identity   create identity (bearer secret)
  *
  * Logs only operation IDs, outcomes and error codes: never bodies, passwords,
  * cookies, authorization headers, page HTML or screenshots.
@@ -121,14 +124,21 @@ function workerFault(error, submitted, request) {
   return submitted ? unknown('worker_fault', 'Unexpected worker error after submission') : failed('worker_fault', 'Unexpected worker error before submission');
 }
 
-async function runOperation(worker, request, startedAt, clientGone) {
+/**
+ * state.submitted: the change was sent (from here on, nothing is retried).
+ * state.expired:   the caller was already told "failed, nothing sent"; nothing
+ *                  may be sent any more. Both flags change synchronously, so
+ *                  exactly one of them can win.
+ */
+async function runOperation(worker, request, startedAt, clientGone, state) {
   const operation = worker.portal.operations[request.operation];
   let submitted = false;
+  const tooLate = () => state.expired || Date.now() - startedAt > config.submitDeadlineMs;
 
   const ctx = {
     config,
     async recordCreateIdentity(playerId) {
-      if (clientGone() || Date.now() - startedAt > config.submitDeadlineMs) {
+      if (clientGone() || tooLate()) {
         throw failed('deadline_exceeded', 'Caller deadline passed before create');
       }
       await identities.record(request.operationId, worker.account.key, playerId);
@@ -138,10 +148,11 @@ async function runOperation(worker, request, startedAt, clientGone) {
       if (clientGone()) {
         throw failed('client_gone', 'Caller disconnected before submission');
       }
-      if (Date.now() - startedAt > config.submitDeadlineMs) {
+      if (tooLate()) {
         throw failed('deadline_exceeded', 'Pre-submission steps took too long');
       }
       submitted = true;
+      state.submitted = true;
       log('submit', { operationId: request.operationId, account: worker.account.key, operation: request.operation });
     },
   };
@@ -149,6 +160,10 @@ async function runOperation(worker, request, startedAt, clientGone) {
   // Pre-submission failures marked retryable (e.g. silent session expiry) are retried once.
   for (let attempt = 1; ; attempt++) {
     try {
+      if (state.expired) {
+        // Answered already (e.g. while waiting in the queue); do not touch the portal.
+        throw failed('deadline_exceeded', 'Pre-submission steps took too long');
+      }
       await worker.session.ensureSession();
       return await operation({ session: worker.session, params: request.params, ctx });
     } catch (caught) {
@@ -217,10 +232,14 @@ async function handleOperation(req, res) {
   }
 
   const worker = workers.get(request.account);
+  const state = { submitted: false, expired: false };
   let status;
   let body;
   try {
-    const result = await worker.queue.run(() => runOperation(worker, request, startedAt, () => closed));
+    const task = worker.queue.run(() => runOperation(worker, request, startedAt, () => closed, state));
+    const result = OPERATIONS[request.operation].changes
+      ? await answerByDeadline(task, state, { startedAt, deadlineMs: config.submitDeadlineMs, operationId })
+      : await task;
     status = 200;
     body = { operationId, outcome: 'succeeded', result };
   } catch (error) {
@@ -288,6 +307,11 @@ const server = http.createServer((req, res) => {
     identities.read(operationId)
       .then((identity) => send(res, identity ? 200 : 404, identity ?? { error: { code: 'identity_not_found' } }))
       .catch(() => send(res, 500, { error: { code: 'identity_unavailable' } }));
+  } else if (req.method === 'GET' && /^\/v1\/operations\/[0-9a-f-]+$/i.test(url.pathname)) {
+    if (!authorized(req)) { send(res, 401, { error: { code: 'unauthorized' } }); return; }
+    const operationId = url.pathname.split('/')[3];
+    if (!UUID.test(operationId)) { send(res, 400, { error: { code: 'invalid_operation_id' } }); return; }
+    send(res, ...operationStatus(operationId, operations.get(operationId)));
   } else if (req.method === 'POST' && url.pathname === '/v1/operations') {
     handleOperation(req, res).catch(() => send(res, 500, { outcome: 'unknown', error: { code: 'worker_fault', message: 'Unexpected worker error' } }));
   } else {
