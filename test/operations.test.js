@@ -15,6 +15,17 @@ test('createPlayer: amount within the initial limit', () => {
   assert.equal(check('createPlayer', { amount: '1', extra: 1 }), 'invalid_params');
 });
 
+test('createPlayer and resetPassword accept an optional fixed password', () => {
+  assert.equal(check('createPlayer', { amount: '0', password: 'Aa1111' }), null);
+  assert.equal(check('resetPassword', { playerId: 'abc123' }), null);
+  assert.equal(check('resetPassword', { playerId: 'abc123', password: 'Aa1111' }), null);
+  for (const bad of ['', '111111', 'aaaaaa', 'Aa11', 'Aa1111111111x', 'Aa11 11', 'Aa1111;', 1111]) {
+    assert.equal(check('createPlayer', { amount: '0', password: bad }), 'invalid_password', String(bad));
+    assert.equal(check('resetPassword', { playerId: 'abc123', password: bad }), 'invalid_password', String(bad));
+  }
+  assert.equal(check('resetPassword', { playerId: 'abc123', password: 'Aa1111', extra: 1 }), 'invalid_params');
+});
+
 test('setScore: signed, non-zero, within the set-score limit', () => {
   assert.equal(check('setScore', { playerId: 'abc123', amount: '10.00' }), null);
   assert.equal(check('setScore', { playerId: 'abc123', amount: '-10.50' }), null);

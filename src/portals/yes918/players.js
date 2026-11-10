@@ -38,7 +38,7 @@ export function playerOperations(site) {
 
     async createPlayer({ session, params, ctx }) {
       const playerId = await randomPlayerId(session, ctx.config);
-      const password = generatePlayerPassword();
+      const password = params.password ?? generatePlayerPassword(); // fixed when the agent turned random passwords off
       await ctx.recordCreateIdentity(playerId);
 
       const json = await submitOnce(session, ctx, {
@@ -74,7 +74,7 @@ export function playerOperations(site) {
     playerInfo: ({ session, params, ctx }) => fetchPlayer(session, params.playerId, ctx.config),
 
     async resetPassword({ session, params, ctx }) {
-      const password = generatePlayerPassword();
+      const password = params.password ?? generatePlayerPassword(); // fixed when the agent turned random passwords off
       await submitOnce(session, ctx, {
         path: `/playerlist/resetpassword?game=${GAME}`,
         code: 'reset',

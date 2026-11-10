@@ -24,6 +24,20 @@ export function validDate(value) {
 
 const validPage = (value) => Number.isInteger(value) && value >= 1 && value <= MAX_PAGE;
 
+/**
+ * Optional fixed player password chosen by the caller (the agent turned
+ * random passwords off). Letters and digits only, with at least one of each,
+ * 6-12 characters, e.g. "Aa1111". Without it the portal plugin generates one.
+ */
+export const FIXED_PASSWORD = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]{6,12}$/;
+
+function checkPassword(params) {
+  if (!('password' in params)) {
+    return null;
+  }
+  return typeof params.password === 'string' && FIXED_PASSWORD.test(params.password) ? null : 'invalid_password';
+}
+
 /** Exactly these keys: rejects unknown fields so typos never pass silently. */
 function exactKeys(params, keys) {
   const actual = Object.keys(params);
@@ -41,13 +55,13 @@ export const OPERATIONS = Object.freeze({
   createPlayer: {
     changes: true,
     validate(params, limits) {
-      if (!exactKeys(params, ['amount'])) {
+      if (!exactKeys(params, ['amount']) && !exactKeys(params, ['amount', 'password'])) {
         return 'invalid_params';
       }
       if (typeof params.amount !== 'string' || !AMOUNT.test(params.amount) || toCents(params.amount) > limits.maxInitialScoreCents) {
         return 'invalid_amount';
       }
-      return null;
+      return checkPassword(params);
     },
   },
 
@@ -66,7 +80,10 @@ export const OPERATIONS = Object.freeze({
     },
   },
 
-  resetPassword: { changes: true, validate: (params) => checkPlayer(params, []) },
+  resetPassword: {
+    changes: true,
+    validate: (params) => ('password' in params ? checkPlayer(params, ['password']) ?? checkPassword(params) : checkPlayer(params, [])),
+  },
 
   disablePlayer: {
     changes: true,

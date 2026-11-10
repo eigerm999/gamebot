@@ -88,7 +88,7 @@ export function playerOperations(site) {
       if (!username) {
         throw failed('player_id_collision', 'Could not generate an unused Wudi player ID', { retryable: true });
       }
-      const password = generatePassword();
+      const password = params.password ?? generatePassword(); // fixed when the agent turned random passwords off
       await ctx.recordCreateIdentity(username);
 
       await submitOnce(session, ctx, {
@@ -142,7 +142,7 @@ export function playerOperations(site) {
 
     async resetPassword({ session, params, ctx }) {
       const player = await findPlayer(session, params.playerId, ctx.config);
-      const password = generatePassword();
+      const password = params.password ?? generatePassword(); // fixed when the agent turned random passwords off
       await submitOnce(session, ctx, {
         path: '/user/front/resetPwd',
         method: 'PUT',
