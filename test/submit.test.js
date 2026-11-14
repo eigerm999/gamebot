@@ -153,7 +153,7 @@ test('an unrecognised answer stays unknown and records what the portal said, red
     await assert.rejects(
       submitOnce(session, ctx, { path: '/x', form: {}, code: 'setscore', classify: () => null }),
       (error) => error instanceof OperationError && error.outcome === 'unknown' && error.code === 'setscore_unconfirmed'
-        && /portal: code 500, Insufficient balance/.test(error.message) && !error.message.includes('abc123secret')
+        && error.message === 'Insufficient balance token=[redacted]' // the portal's words, redacted, nothing added
     );
   } finally {
     console.log = original;

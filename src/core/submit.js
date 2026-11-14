@@ -58,7 +58,8 @@ export async function submitOnce(session, ctx, { path, method = 'POST', form = n
     throw failed(`${code}_rejected`, redact(verdict.rejected) || 'Portal rejected the request');
   }
   const detail = reportUnconfirmed(ctx, code, `${code}_unconfirmed`, response, json);
-  throw unknown(`${code}_unconfirmed`, `Response did not confirm success${detail}`);
+  // The portal's own words when it gave any; the caller shows them as-is.
+  throw unknown(`${code}_unconfirmed`, describeAnswer(response, json).portalMessage ?? `Response did not confirm success${detail}`);
 }
 
 /**
