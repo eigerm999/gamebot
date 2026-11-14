@@ -151,5 +151,19 @@ export function classifyWudi(json, response, session = null) {
   if (response.status >= 400 && response.status < 500) {
     return { rejected: String(json.msg ?? json.message ?? `Wudi returned HTTP ${response.status}`) };
   }
+  // Code 500 answers Wudi gives when it refuses a change before applying it.
+  // Only exact, confirmed refusals: an unrecognised 500 stays unknown.
+  const message = String(json.msg ?? json.message ?? '').trim();
+  if (code === 500 && WUDI_REFUSALS.some((pattern) => pattern.test(message))) {
+    return { rejected: message }; // Wudi's own words, shown to the agent as-is
+  }
   return null;
 }
+
+/**
+ * Confirmed Wudi refusals (code 500). Add a message here only after checking
+ * in the Wudi back office that the change was not applied.
+ *   正在游戏中 — the player is in a game; balance changes are refused
+ *               (2026-11-14: player still had the 12 after a refused withdrawal)
+ */
+export const WUDI_REFUSALS = Object.freeze([/^正在游戏中[。.!！]?$/]);

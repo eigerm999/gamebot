@@ -141,3 +141,27 @@ test('readPage: login page and HTTP errors are failed', async () => {
   await assert.rejects(readPage(fakeSession(new Error('down')), '/r', { config, code: 'r', isLoginPage }), (error) => error.code === 'r_transport' && error.retryable);
   assert.equal(await readPage(fakeSession({ text: 'ok' }), '/r', { config, code: 'r', isLoginPage }), 'ok');
 });
+
+test('an unrecognised answer stays unknown and records what the portal said, redacted', async () => {
+  const lines = [];
+  const original = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    const body = { code: 500, msg: 'Insufficient balance token=abc123secret', data: { userWalletId: 9 } };
+    const session = fakeSession({ status: 200, text: JSON.stringify(body) });
+    const ctx = { ...fakeCtx(), operationId: 'op-9', account: 'wudi-spadik' };
+    await assert.rejects(
+      submitOnce(session, ctx, { path: '/x', form: {}, code: 'setscore', classify: () => null }),
+      (error) => error instanceof OperationError && error.outcome === 'unknown' && error.code === 'setscore_unconfirmed'
+        && /portal: code 500, Insufficient balance/.test(error.message) && !error.message.includes('abc123secret')
+    );
+  } finally {
+    console.log = original;
+  }
+  const entry = lines.map((l) => JSON.parse(l)).find((l) => l.event === 'submit_unconfirmed');
+  assert.equal(entry.operationId, 'op-9');
+  assert.equal(entry.http, 200);
+  assert.equal(entry.portalCode, '500');
+  assert.match(entry.portalMessage, /^Insufficient balance token=\[redacted\]$/);
+  assert.ok(!JSON.stringify(entry).includes('userWalletId'), 'never logs the body');
+});

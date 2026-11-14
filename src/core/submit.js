@@ -1,4 +1,4 @@
-import { OperationError, failed, redact, unknown } from './errors.js';
+import { OperationError, failed, log, redact, unknown } from './errors.js';
 import { parseJson } from './portal-http.js';
 
 /**
@@ -36,6 +36,7 @@ export async function submitOnce(session, ctx, { path, method = 'POST', form = n
 
   const json = parseJson(response.text);
   if (!json) {
+    reportUnconfirmed(ctx, code, `${code}_malformed`, response, null);
     throw unknown(`${code}_malformed`, `Response was not JSON (HTTP ${response.status})`);
   }
 
@@ -46,6 +47,7 @@ export async function submitOnce(session, ctx, { path, method = 'POST', form = n
     if (error instanceof OperationError) {
       throw error;
     }
+    reportUnconfirmed(ctx, code, `${code}_unconfirmed`, response, json);
     throw unknown(`${code}_unconfirmed`, 'Response could not be judged');
   }
 
@@ -55,5 +57,29 @@ export async function submitOnce(session, ctx, { path, method = 'POST', form = n
   if (verdict && typeof verdict.rejected === 'string') {
     throw failed(`${code}_rejected`, redact(verdict.rejected) || 'Portal rejected the request');
   }
-  throw unknown(`${code}_unconfirmed`, 'Response did not confirm success');
+  const detail = reportUnconfirmed(ctx, code, `${code}_unconfirmed`, response, json);
+  throw unknown(`${code}_unconfirmed`, `Response did not confirm success${detail}`);
+}
+
+/**
+ * The portal answered a submitted change with something we do not recognise.
+ * Log what it said (HTTP status, its own code field and redacted message —
+ * never the body, tokens or credentials) so a person can settle the attempt
+ * and, once a code is proven to mean "refused, nothing changed", the portal's
+ * classifier can be taught it. Returns a short suffix for the error message.
+ */
+export function describeAnswer(response, json) {
+  const pick = (value) => (value === undefined || value === null ? null : redact(String(value)).slice(0, 40) || null);
+  return {
+    http: response?.status ?? null,
+    portalCode: json ? pick(json.code ?? json.error ?? json.status) : null,
+    portalMessage: json ? redact(json.msg ?? json.message ?? '').slice(0, 120) || null : null,
+  };
+}
+
+function reportUnconfirmed(ctx, code, errorCode, response, json) {
+  const answer = describeAnswer(response, json);
+  log('submit_unconfirmed', { operationId: ctx.operationId ?? null, account: ctx.account ?? null, operation: code, code: errorCode, ...answer });
+  const parts = [answer.portalCode !== null ? `code ${answer.portalCode}` : null, answer.portalMessage].filter(Boolean);
+  return parts.length ? ` (portal: ${parts.join(', ')})` : ` (HTTP ${answer.http})`;
 }

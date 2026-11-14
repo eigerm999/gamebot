@@ -137,6 +137,8 @@ async function runOperation(worker, request, startedAt, clientGone, state) {
 
   const ctx = {
     config,
+    operationId: request.operationId, // for logs only
+    account: worker.account.key,
     async recordCreateIdentity(playerId) {
       if (clientGone() || tooLate()) {
         throw failed('deadline_exceeded', 'Caller deadline passed before create');

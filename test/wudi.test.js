@@ -98,6 +98,12 @@ test('generated Wudi credentials match portal rules', () => {
 test('Wudi response classifier accepts only application code 200', () => {
   assert.deepEqual(classifyWudi({ code: 200, msg: 'ok' }, { ok: true }), { ok: { code: 200, msg: 'ok' } });
   assert.equal(classifyWudi({ code: 500, msg: 'unclear' }, { ok: true, status: 200 }), null);
+  // Confirmed refusal: the player is in a game. Failed with Wudi's exact message.
+  assert.deepEqual(classifyWudi({ msg: '正在游戏中', code: 500 }, { ok: true, status: 200 }), { rejected: '正在游戏中' });
+  assert.deepEqual(classifyWudi({ msg: '正在游戏中', code: '500' }, { ok: true, status: 200 }), { rejected: '正在游戏中' });
+  // Only that exact refusal; other 500s, or the text with another code, stay unknown.
+  assert.equal(classifyWudi({ msg: '正在游戏中，余额已扣除', code: 500 }, { ok: true, status: 200 }), null);
+  assert.equal(classifyWudi({ msg: '正在游戏中', code: 501 }, { ok: true, status: 200 }), null);
   assert.equal(classifyWudi({ code: null, msg: 'malformed' }, { ok: true, status: 200 }), null);
   const session = { loggedOut: null, markLoggedOut(code) { this.loggedOut = code; } };
   assert.deepEqual(classifyWudi({ code: 401, msg: 'expired' }, { ok: true, status: 200 }, session), { rejected: 'Wudi portal session expired' });
